@@ -2,6 +2,7 @@ package com.kclassic.supplier.controller;
 
 import com.kclassic.supplier.dto.SupplierRequest;
 import com.kclassic.supplier.dto.SupplierResponse;
+import com.kclassic.supplier.entity.RawMaterialCache;
 import com.kclassic.supplier.entity.Supplier;
 import com.kclassic.supplier.service.SupllierService;
 import lombok.extern.slf4j.Slf4j;
@@ -10,9 +11,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/suppliers")
-@CrossOrigin(origins = "http://localhost:3000")
 @Slf4j
 public class SupplierController {
 
@@ -52,5 +54,9 @@ public class SupplierController {
     public ResponseEntity<Void> deleteSupplier(@PathVariable String id) {
         supplierService.deleteSupplier(id);
         return ResponseEntity.noContent().build();
+    }
+    @GetMapping("/{supplierId}/raw-materials")
+    public ResponseEntity<List<RawMaterialCache>> getSupplierRawMaterials(@PathVariable String supplierId) {
+        return ResponseEntity.ok(supplierService.getSupplierRawMaterials(supplierId));
     }
 }

@@ -2,8 +2,10 @@ package com.kclassic.supplier.service.impl;
 
 import com.kclassic.supplier.dto.SupplierRequest;
 import com.kclassic.supplier.dto.SupplierResponse;
+import com.kclassic.supplier.entity.RawMaterialCache;
 import com.kclassic.supplier.entity.Supplier;
 import com.kclassic.supplier.mapper.SupplierMapper;
+import com.kclassic.supplier.repository.RawMaterialCacheRepository;
 import com.kclassic.supplier.repository.SupplierRepository;
 import com.kclassic.supplier.service.SupllierService;
 import com.kclassic.supplier.service.SupplierProducer;
@@ -14,20 +16,25 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 @Service
 @Slf4j
 public class SupplierServiceImpl implements SupllierService {
 
     private final SupplierRepository supplierRepository;
+    private final RawMaterialCacheRepository rawMaterialCacheRepository;
     private final SupplierMapper mapper;
     private final SupplierProducer producer;
 
     public SupplierServiceImpl(SupplierRepository supplierRepository,
+                                 RawMaterialCacheRepository rawMaterialCacheRepository,
                                SupplierMapper mapper,
                                SupplierProducer producer) {
         this.supplierRepository = supplierRepository;
         this.mapper = mapper;
         this.producer = producer;
+        this.rawMaterialCacheRepository = rawMaterialCacheRepository;
     }
 
     @Override
@@ -102,6 +109,11 @@ public class SupplierServiceImpl implements SupllierService {
         } catch (Exception e) {
             log.error("Supplier supprimé mais erreur Kafka: {}", e.getMessage());
         }
+    }
+
+    @Override
+    public List<RawMaterialCache> getSupplierRawMaterials(String supplierId) {
+        return rawMaterialCacheRepository.findBySupplierId(supplierId);
     }
 
 

@@ -10,11 +10,8 @@ public class SupplierResponse {
     private String address;
     private String bankAccount;
     private LocalDateTime updatedAt;
-
-    // ✅ Constructeur sans arguments
     public SupplierResponse() {}
 
-    // ✅ Constructeur avec tous les arguments
     public SupplierResponse(String id, String name, String email, String phone, String address, String bankAccount, LocalDateTime updatedAt) {
         this.id = id;
         this.name = name;
@@ -25,7 +22,6 @@ public class SupplierResponse {
         this.updatedAt = updatedAt;
     }
 
-    // ✅ Getters et Setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -47,7 +43,6 @@ public class SupplierResponse {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
-    // ✅ (optionnel) toString pour debug
     @Override
     public String toString() {
         return "SupplierResponse{" +

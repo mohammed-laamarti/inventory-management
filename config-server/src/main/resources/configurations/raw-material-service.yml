@@ -1,0 +1,55 @@
+server:
+  port: 8092
+
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://postgres:5432/raw_material_db
+    username: admin
+    password: admin
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database: postgresql
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+  kafka:
+    bootstrap-servers: kafka:9092
+
+    # Configuration Consumer
+    consumer:
+      group-id: rawmaterial-group
+      auto-offset-reset: earliest
+      enable-auto-commit: true
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+        spring.json.use.type.headers: false
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.value.default.type: com.kclassic.rawmaterial.dto.SupplierEvent
+
+    # Configuration Producer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+        delivery.timeout.ms: 30000
+        request.timeout.ms: 15000
+        max.block.ms: 10000
+        retries: 3
+        retry.backoff.ms: 1000
+        linger.ms: 10
+        batch.size: 16384
+        buffer.memory: 33554432
+        acks: 1
+
+#eureka:
+#  client:
+#    service-url:
+#      defaultZone: http://discovery:8761/eureka/
+#  instance:
+#    prefer-ip-address: false

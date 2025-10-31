@@ -23,6 +23,10 @@ public class ProductServiceImpl implements ProductService {
     @Override
     public Page<ProductResponse> getAllProducts(int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
+        repository.findAll().forEach(p ->
+                System.out.println("Product: " + p.getName())
+        );
+                System.out.println(repository.findAll(pageable).map(mapper::toProductDto));
         return repository.findAll(pageable).map(mapper::toProductDto);
     }
 
