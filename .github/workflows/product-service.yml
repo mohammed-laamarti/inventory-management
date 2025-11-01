@@ -8,6 +8,10 @@ on:
       - 'product/**'
       - '.github/workflows/product-service.yml'
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
