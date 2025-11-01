@@ -34,11 +34,21 @@ jobs:
       - name: Login to Azure Container Registry
         run: az acr login --name mohammed
 
-      - name: Build and Push Docker image
+      - name: Build Docker image
         run: |
           IMAGE_NAME=mohammed.azurecr.io/gateway-service
           docker build -t $IMAGE_NAME:${{ github.sha }} ./gateway
-          docker push $IMAGE_NAME:${{ github.sha }}
+
+      # ✅ Étape Trivy pour scanner l'image avant le push
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@v2
+        with:
+          image-ref: mohammed.azurecr.io/gateway-service:${{ github.sha }}
+          severity-threshold: HIGH
+
+      - name: Push Docker image
+        run: |
+          docker push mohammed.azurecr.io/gateway-service:${{ github.sha }}
 
       - name: Set AKS context
         uses: azure/aks-set-context@v3
@@ -49,5 +59,4 @@ jobs:
 
       - name: Deploy to AKS
         run: |
-          kubectl set image deployment/gateway-service gateway-service=mohammed.azurecr.io/gateway-service:${{ github.sha }} -n inventory
-          kubectl rollout status deployment/gateway-service -n inventory
+          kubectl set image deployment/gateway-service gateway-service=mohammed.azurecr.io/gateway-service:${{ github.s
