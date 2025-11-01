@@ -39,12 +39,18 @@ jobs:
           IMAGE_NAME=mohammed.azurecr.io/product-service
           docker build -t $IMAGE_NAME:${{ github.sha }} ./product
 
-      # ✅ Étape Trivy pour scanner l'image avant le push
       - name: Scan Docker image with Trivy
-        uses: aquasecurity/trivy-action@v2
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: mohammed.azurecr.io/product-service:${{ github.sha }}
-          severity-threshold: HIGH
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
 
       - name: Push Docker image
         run: |

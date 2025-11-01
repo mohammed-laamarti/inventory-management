@@ -52,3 +52,4 @@
 #          kubectl set image deployment/discovery-deployment discovery=mohammed.azurecr.io/discovery-service:${{ github.sha }} -n inventory
 #          kubectl rollout status deployment/discovery-deployment -n inventory
 
+
