@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: config-server
-          image: mohammed.azurecr.io/config-server:latest
+          image: mohammed.azurecr.io/config-server
           ports:
             - containerPort: 8888
           livenessProbe:

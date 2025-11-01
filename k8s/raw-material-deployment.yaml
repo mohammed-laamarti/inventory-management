@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: raw-material-service
-          image: mohammed.azurecr.io/raw-material-service:latest
+          image: mohammed.azurecr.io/raw-material-service
           ports:
             - containerPort: 8092
           env:

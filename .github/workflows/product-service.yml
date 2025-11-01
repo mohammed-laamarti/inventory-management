@@ -49,5 +49,5 @@ jobs:
 
       - name: Deploy to AKS
         run: |
-          kubectl set image deployment/product-deployment product=mohammed.azurecr.io/product-service:${{ github.sha }} -n inventory
-          kubectl rollout status deployment/product-deployment -n inventory
+          kubectl set image deployment/product-service product-service=mohammed.azurecr.io/product-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/product-service -n inventory

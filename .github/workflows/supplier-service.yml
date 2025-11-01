@@ -49,5 +49,5 @@ jobs:
 
       - name: Deploy to AKS
         run: |
-          kubectl set image deployment/supplier-deployment supplier=mohammed.azurecr.io/supplier-service:${{ github.sha }} -n inventory
-          kubectl rollout status deployment/supplier-deployment -n inventory
+          kubectl set image deployment/supplier-service supplier-service=mohammed.azurecr.io/supplier-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/supplier-service -n inventory

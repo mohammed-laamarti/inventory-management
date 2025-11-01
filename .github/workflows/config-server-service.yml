@@ -49,5 +49,5 @@ jobs:
 
       - name: Deploy to AKS
         run: |
-          kubectl set image deployment/config-server-deployment config-server=mohammed.azurecr.io/config-server-service:${{ github.sha }} -n inventory
-          kubectl rollout status deployment/config-server-deployment -n inventory
+          kubectl set image deployment/config-server config-server=mohammed.azurecr.io/config-server-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/config-server -n inventory

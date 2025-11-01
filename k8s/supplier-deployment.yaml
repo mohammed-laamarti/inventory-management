@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: supplier-service
-          image: mohammed.azurecr.io/supplier-service:latest
+          image: mohammed.azurecr.io/supplier-service
           ports:
             - containerPort: 8091
           env:

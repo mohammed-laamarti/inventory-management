@@ -49,5 +49,5 @@ jobs:
 
       - name: Deploy to AKS
         run: |
-          kubectl set image deployment/gateway-deployment gateway=mohammed.azurecr.io/gateway-service:${{ github.sha }} -n inventory
-          kubectl rollout status deployment/gateway-deployment -n inventory
+          kubectl set image deployment/gateway-service gateway-service=mohammed.azurecr.io/gateway-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/gateway-service -n inventory

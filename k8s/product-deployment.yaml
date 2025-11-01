@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: product-service
-          image: mohammed.azurecr.io/product-service:latest
+          image: mohammed.azurecr.io/product-service
           ports:
             - containerPort: 8090
           env:

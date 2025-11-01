@@ -49,5 +49,5 @@ jobs:
 
       - name: Deploy to AKS
         run: |
-          kubectl set image deployment/raw-material-deployment raw-material=mohammed.azurecr.io/raw-material-service:${{ github.sha }} -n inventory
-          kubectl rollout status deployment/raw-material-deployment -n inventory
+          kubectl set image deployment/raw-material-service raw-material-service=mohammed.azurecr.io/raw-material-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/raw-material-service -n inventory
