@@ -12,11 +12,23 @@ spring:
 server:
   port: 8888
 
+#management:
+#  endpoints:
+#    web:
+#      exposure:
+#        include: health,info
+#  endpoint:
+#    health:
+#      show-details: always
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health, info, prometheus  # Endpoints exposés
   endpoint:
-    health:
-      show-details: always
+    prometheus:
+      access: unrestricted  # Prometheus peut accéder sans auth
+  prometheus:
+    metrics:
+      export:
+        enabled: true

@@ -1,0 +1,53 @@
+name: CI/CD Supplier Service
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supplier/**'
+      - '.github/workflows/supplier-service.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -f supplier/pom.xml clean package -DskipTests
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name mohammed
+
+      - name: Build and Push Docker image
+        run: |
+          IMAGE_NAME=mohammed.azurecr.io/supplier-service
+          docker build -t $IMAGE_NAME:${{ github.sha }} ./supplier
+          docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          cluster-name: aks-Cloud
+          resource-group: aks-Cloud
+
+      - name: Deploy to AKS
+        run: |
+          kubectl set image deployment/supplier-deployment supplier=mohammed.azurecr.io/supplier-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/supplier-deployment -n inventory

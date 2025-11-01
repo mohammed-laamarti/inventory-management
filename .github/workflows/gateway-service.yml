@@ -1,0 +1,53 @@
+name: CI/CD Gateway Service
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'gateway/**'
+      - '.github/workflows/gateway-service.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -f gateway/pom.xml clean package -DskipTests
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name mohammed
+
+      - name: Build and Push Docker image
+        run: |
+          IMAGE_NAME=mohammed.azurecr.io/gateway-service
+          docker build -t $IMAGE_NAME:${{ github.sha }} ./gateway
+          docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          cluster-name: aks-Cloud
+          resource-group: aks-Cloud
+
+      - name: Deploy to AKS
+        run: |
+          kubectl set image deployment/gateway-deployment gateway=mohammed.azurecr.io/gateway-service:${{ github.sha }} -n inventory
+          kubectl rollout status deployment/gateway-deployment -n inventory

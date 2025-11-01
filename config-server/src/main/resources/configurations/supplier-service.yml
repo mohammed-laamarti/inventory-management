@@ -45,3 +45,15 @@ spring:
 #      defaultZone: http://discovery:8761/eureka/
 #  instance:
 #    prefer-ip-address: false
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus  # Endpoints exposés
+  endpoint:
+    prometheus:
+      access: unrestricted  # Prometheus peut accéder sans auth
+  prometheus:
+    metrics:
+      export:
+        enabled: true
