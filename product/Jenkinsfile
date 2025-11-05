@@ -42,8 +42,9 @@ pipeline {
                 echo "=== Checkout du code pour ${SERVICE_NAME} ==="
                 checkout scm
 
+                // Commenté temporairement pour forcer le build
+                /*
                 script {
-                    // Vérifier si des changements dans product/
                     def changes = sh(
                         script: 'git diff --name-only HEAD~1 2>/dev/null || echo "product/"',
                         returnStdout: true
@@ -57,6 +58,9 @@ pipeline {
 
                     echo "✅ Changements détectés dans product/"
                 }
+                */
+
+                echo "✅ Build forcé (vérification des changements désactivée)"
             }
         }
 
