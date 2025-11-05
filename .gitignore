@@ -1,0 +1,39 @@
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.backup
+**/*.tfvars
+**/.terraform.lock.hcl
+
+# Jenkins
+**/*.log
+**/jenkins_home/
+
+# Docker
+**/*.tar
+**/*.tar.gz
+
+# IDE
+**/.vscode/
+**/.idea/
+**/*.iml
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Build artifacts
+**/target/
+**/build/
+**/dist/
+**/out/
+**/bin/
+
+# Dependencies
+**/node_modules/
+**/.gradle/
+**/.mvn/
+
+# Logs
+**/*.log
+**/logs/

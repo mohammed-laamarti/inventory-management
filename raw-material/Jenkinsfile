@@ -1,0 +1,301 @@
+pipeline {
+    agent any
+
+    environment {
+        // Configuration du service
+        SERVICE_NAME = 'raw-material-service'
+        SERVICE_DIR = 'raw-material'
+
+        // Azure Container Registry
+        ACR_NAME = 'mohammed'
+        ACR_URL = "${ACR_NAME}.azurecr.io"
+        IMAGE_NAME = "${ACR_URL}/${SERVICE_NAME}"
+
+        // Azure Kubernetes
+        AKS_CLUSTER = 'aks'
+        AKS_RESOURCE_GROUP = 'aks-Cloud'
+        K8S_NAMESPACE = 'inventory'
+
+        // Credentials IDs (à créer dans Jenkins)
+        AZURE_CREDENTIALS_ID = 'azure-credentials'
+
+        // Version de l'image
+        IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
+
+        // Maven
+        MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
+    }
+
+    // Déclencher seulement si changements dans raw-material/
+    options {
+        // Garder seulement les 10 derniers builds
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // Timeout après 30 minutes
+        timeout(time: 30, unit: 'MINUTES')
+        // Désactiver concurrent builds
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('🔍 Checkout Code') {
+            steps {
+                echo "=== Checkout du code pour ${SERVICE_NAME} ==="
+                checkout scm
+
+                script {
+                    // Vérifier si des changements dans raw-material/
+                    def changes = sh(
+                        script: 'git diff --name-only HEAD~1 2>/dev/null || echo "raw-material/"',
+                        returnStdout: true
+                    ).trim()
+
+                    if (!changes.contains('raw-material/') && !changes.contains('Jenkinsfile')) {
+                        echo "⚠️  Aucun changement dans raw-material/, skip du build"
+                        currentBuild.result = 'NOT_BUILT'
+                        error('Aucun changement détecté dans raw-material/')
+                    }
+
+                    echo "✅ Changements détectés dans raw-material/"
+                }
+            }
+        }
+
+        stage('☕ Setup Java 17') {
+            steps {
+                echo "=== Configuration de Java 17 ==="
+                script {
+                    // Java devrait être déjà installé sur l'agent Jenkins
+                    sh 'java -version'
+                    sh 'mvn -version'
+                }
+            }
+        }
+
+        stage('📦 Build with Maven') {
+            steps {
+                echo "=== Build Maven du Raw Material Service ==="
+                dir(SERVICE_DIR) {
+                    sh """
+                        mvn clean package -DskipTests ${MAVEN_OPTS}
+                    """
+                }
+            }
+            post {
+                success {
+                    echo "✅ Build Maven réussi"
+                }
+                failure {
+                    echo "❌ Build Maven échoué"
+                }
+            }
+        }
+
+        stage('🔐 Login to Azure') {
+            steps {
+                echo "=== Connexion à Azure ==="
+                withCredentials([azureServicePrincipal(
+                    credentialsId: AZURE_CREDENTIALS_ID,
+                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                    clientIdVariable: 'AZURE_CLIENT_ID',
+                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                    tenantIdVariable: 'AZURE_TENANT_ID'
+                )]) {
+                    sh """
+                        az login --service-principal \
+                            -u \$AZURE_CLIENT_ID \
+                            -p \$AZURE_CLIENT_SECRET \
+                            --tenant \$AZURE_TENANT_ID
+
+                        az account set --subscription \$AZURE_SUBSCRIPTION_ID
+                    """
+                }
+            }
+        }
+
+        stage('🐳 Login to Azure Container Registry') {
+            steps {
+                echo "=== Connexion à Azure Container Registry ==="
+                sh "az acr login --name ${ACR_NAME}"
+            }
+        }
+
+        stage('🏗️  Build Docker Image') {
+            steps {
+                echo "=== Build de l'image Docker ==="
+                dir(SERVICE_DIR) {
+                    script {
+                        sh """
+                            docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                        """
+                    }
+                }
+            }
+            post {
+                success {
+                    echo "✅ Image Docker construite: ${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('🔒 Scan Docker Image with Trivy') {
+            steps {
+                echo "=== Scan de sécurité avec Trivy ==="
+                script {
+                    // Scanner l'image avec Trivy
+                    sh """
+                        trivy image \
+                            --format sarif \
+                            --output trivy-results.sarif \
+                            --severity HIGH,CRITICAL \
+                            ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    """
+
+                    // Scanner en mode table pour les logs
+                    sh """
+                        trivy image \
+                            --severity HIGH,CRITICAL \
+                            ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    """
+                }
+            }
+            post {
+                always {
+                    // Archiver les résultats
+                    archiveArtifacts artifacts: 'trivy-results.sarif', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('📤 Push Docker Image') {
+            steps {
+                echo "=== Push de l'image vers ACR ==="
+                sh """
+                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                    docker push ${IMAGE_NAME}:latest
+                """
+            }
+            post {
+                success {
+                    echo "✅ Image pushée: ${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('☸️  Set AKS Context') {
+            steps {
+                echo "=== Configuration du contexte AKS ==="
+                withCredentials([azureServicePrincipal(
+                    credentialsId: AZURE_CREDENTIALS_ID,
+                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                    clientIdVariable: 'AZURE_CLIENT_ID',
+                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                    tenantIdVariable: 'AZURE_TENANT_ID'
+                )]) {
+                    sh """
+                        az aks get-credentials \
+                            --resource-group ${AKS_RESOURCE_GROUP} \
+                            --name ${AKS_CLUSTER} \
+                            --overwrite-existing
+                    """
+                }
+
+                // Vérifier la connexion
+                sh 'kubectl cluster-info'
+                sh "kubectl get nodes"
+            }
+        }
+
+        stage('🚀 Deploy to AKS') {
+            steps {
+                echo "=== Déploiement vers AKS ==="
+                sh """
+                    kubectl set image deployment/${SERVICE_NAME} \
+                        ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                        -n ${K8S_NAMESPACE}
+
+                    echo "Attente du rollout..."
+                    kubectl rollout status deployment/${SERVICE_NAME} \
+                        -n ${K8S_NAMESPACE} \
+                        --timeout=5m
+                """
+            }
+            post {
+                success {
+                    echo "✅ Déploiement réussi sur AKS"
+                }
+                failure {
+                    echo "❌ Déploiement échoué, rollback en cours..."
+                    sh """
+                        kubectl rollout undo deployment/${SERVICE_NAME} \
+                            -n ${K8S_NAMESPACE} || true
+                    """
+                }
+            }
+        }
+
+        stage('✅ Verify Deployment') {
+            steps {
+                echo "=== Vérification du déploiement ==="
+                sh """
+                    echo "Status des pods:"
+                    kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+
+                    echo "\\nStatus du deployment:"
+                    kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+
+                    echo "\\nStatus du service:"
+                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || echo "Pas de service trouvé"
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ========================================
+            ✅ Pipeline Raw Material Service réussi !
+            ========================================
+            Image: ${IMAGE_NAME}:${IMAGE_TAG}
+            Namespace: ${K8S_NAMESPACE}
+            Build: #${BUILD_NUMBER}
+            ========================================
+            """
+
+            // Notification (optionnel)
+            // slackSend color: 'good', message: "✅ Raw Material Service déployé avec succès"
+        }
+
+        failure {
+            echo """
+            ========================================
+            ❌ Pipeline Raw Material Service échoué !
+            ========================================
+            Build: #${BUILD_NUMBER}
+            Consultez les logs pour plus de détails
+            ========================================
+            """
+
+            // Notification (optionnel)
+            // slackSend color: 'danger', message: "❌ Raw Material Service déploiement échoué"
+        }
+
+        always {
+            echo "=== Nettoyage ==="
+
+            // Nettoyer les images Docker locales pour économiser l'espace
+            sh """
+                docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                docker rmi ${IMAGE_NAME}:latest || true
+            """
+
+            // Logout Azure
+            sh 'az logout || true'
+
+            // Nettoyer le workspace (optionnel)
+            // cleanWs()
+        }
+    }
+}
+
