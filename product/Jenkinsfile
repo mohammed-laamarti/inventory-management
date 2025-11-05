@@ -64,7 +64,6 @@ pipeline {
             steps {
                 echo "=== Configuration de Java 17 ==="
                 script {
-                    // Java devrait être déjà installé sur l'agent Jenkins
                     sh 'java -version'
                     sh 'mvn -version'
                 }
@@ -150,7 +149,6 @@ pipeline {
                             ${IMAGE_NAME}:${IMAGE_TAG} || true
                     """
 
-                    // Scanner en mode table pour les logs
                     sh """
                         trivy image \
                             --severity HIGH,CRITICAL \
