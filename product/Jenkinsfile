@@ -16,7 +16,7 @@ pipeline {
         AKS_RESOURCE_GROUP = 'aks-Cloud'
         K8S_NAMESPACE = 'inventory'
 
-        // Credentials IDs (à créer dans Jenkins)
+        // Credentials IDs
         AZURE_CREDENTIALS_ID = 'azure-credentials'
 
         // Version de l'image
@@ -26,45 +26,24 @@ pipeline {
         MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
     }
 
-    // Déclencher seulement si changements dans product/
     options {
-        // Garder seulement les 10 derniers builds
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        // Timeout après 30 minutes
         timeout(time: 30, unit: 'MINUTES')
-        // Désactiver concurrent builds
         disableConcurrentBuilds()
     }
 
     stages {
-        stage('🔍 Checkout Code') {
+        stage('Checkout Code') {
             steps {
                 echo "=== Checkout du code pour ${SERVICE_NAME} ==="
                 checkout scm
 
-                // Commenté temporairement pour forcer le build
-                /*
-                script {
-                    def changes = sh(
-                        script: 'git diff --name-only HEAD~1 2>/dev/null || echo "product/"',
-                        returnStdout: true
-                    ).trim()
-
-                    if (!changes.contains('product/') && !changes.contains('Jenkinsfile')) {
-                        echo "⚠️  Aucun changement dans product/, skip du build"
-                        currentBuild.result = 'NOT_BUILT'
-                        error('Aucun changement détecté dans product/')
-                    }
-
-                    echo "✅ Changements détectés dans product/"
-                }
-                */
-
-                echo "✅ Build forcé (vérification des changements désactivée)"
+                // Désactivé temporairement pour testing
+                echo "Build force - verification des changements desactivee"
             }
         }
 
-        stage('☕ Setup Java 17') {
+        stage('Setup Java 17') {
             steps {
                 echo "=== Configuration de Java 17 ==="
                 script {
@@ -74,28 +53,26 @@ pipeline {
             }
         }
 
-        stage('📦 Build with Maven') {
+        stage('Build with Maven') {
             steps {
                 echo "=== Build Maven du Product Service ==="
                 dir(SERVICE_DIR) {
-                    sh """
-                        mvn clean package -DskipTests ${MAVEN_OPTS}
-                    """
+                    sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
                 }
             }
             post {
                 success {
-                    echo "✅ Build Maven réussi"
+                    echo "Build Maven reussi"
                 }
                 failure {
-                    echo "❌ Build Maven échoué"
+                    echo "Build Maven echoue"
                 }
             }
         }
 
-        stage('🔐 Login to Azure') {
+        stage('Login to Azure') {
             steps {
-                echo "=== Connexion à Azure ==="
+                echo "=== Connexion a Azure ==="
                 withCredentials([azureServicePrincipal(
                     credentialsId: AZURE_CREDENTIALS_ID,
                     subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
@@ -115,14 +92,14 @@ pipeline {
             }
         }
 
-        stage('🐳 Login to Azure Container Registry') {
+        stage('Login to ACR') {
             steps {
-                echo "=== Connexion à Azure Container Registry ==="
+                echo "=== Connexion a Azure Container Registry ==="
                 sh "az acr login --name ${ACR_NAME}"
             }
         }
 
-        stage('🏗️  Build Docker Image') {
+        stage('Build Docker Image') {
             steps {
                 echo "=== Build de l'image Docker ==="
                 dir(SERVICE_DIR) {
@@ -136,14 +113,14 @@ pipeline {
             }
             post {
                 success {
-                    echo "✅ Image Docker construite: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Image Docker construite: ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
-        stage('🔒 Scan Docker Image with Trivy') {
+        stage('Scan Docker Image') {
             steps {
-                echo "=== Scan de sécurité avec Trivy ==="
+                echo "=== Scan de securite avec Trivy ==="
                 script {
                     sh """
                         trivy image \
@@ -167,7 +144,7 @@ pipeline {
             }
         }
 
-        stage('📤 Push Docker Image') {
+        stage('Push Docker Image') {
             steps {
                 echo "=== Push de l'image vers ACR ==="
                 sh """
@@ -177,12 +154,12 @@ pipeline {
             }
             post {
                 success {
-                    echo "✅ Image pushée: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Image pushee: ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
-        stage('☸️  Set AKS Context') {
+        stage('Set AKS Context') {
             steps {
                 echo "=== Configuration du contexte AKS ==="
                 withCredentials([azureServicePrincipal(
@@ -200,15 +177,14 @@ pipeline {
                     """
                 }
 
-                // Vérifier la connexion
                 sh 'kubectl cluster-info'
                 sh "kubectl get nodes"
             }
         }
 
-        stage('🚀 Deploy to AKS') {
+        stage('Deploy to AKS') {
             steps {
-                echo "=== Déploiement vers AKS ==="
+                echo "=== Deploiement vers AKS ==="
                 sh """
                     kubectl set image deployment/${SERVICE_NAME} \
                         ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
@@ -222,10 +198,10 @@ pipeline {
             }
             post {
                 success {
-                    echo "✅ Déploiement réussi sur AKS"
+                    echo "Deploiement reussi sur AKS"
                 }
                 failure {
-                    echo "❌ Déploiement échoué, rollback en cours..."
+                    echo "Deploiement echoue, rollback en cours..."
                     sh """
                         kubectl rollout undo deployment/${SERVICE_NAME} \
                             -n ${K8S_NAMESPACE} || true
@@ -234,18 +210,20 @@ pipeline {
             }
         }
 
-        stage('✅ Verify Deployment') {
+        stage('Verify Deployment') {
             steps {
-                echo "=== Vérification du déploiement ==="
+                echo "=== Verification du deploiement ==="
                 sh """
                     echo "Status des pods:"
                     kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
 
-                    echo "\\nStatus du deployment:"
+                    echo ""
+                    echo "Status du deployment:"
                     kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
 
-                    echo "\\nStatus du service:"
-                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || echo "Pas de service trouvé"
+                    echo ""
+                    echo "Status du service:"
+                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || echo "Pas de service trouve"
                 """
             }
         }
@@ -255,66 +233,35 @@ pipeline {
         success {
             echo """
             ========================================
-            ✅ Pipeline Product Service réussi !
+            Pipeline Product Service reussi !
             ========================================
             Image: ${IMAGE_NAME}:${IMAGE_TAG}
             Namespace: ${K8S_NAMESPACE}
             Build: #${BUILD_NUMBER}
             ========================================
             """
-
-            // Notification (optionnel)
-            // slackSend color: 'good', message: "✅ Product Service déployé avec succès"
         }
 
         failure {
             echo """
             ========================================
-            ❌ Pipeline Product Service échoué !
+            Pipeline Product Service echoue !
             ========================================
             Build: #${BUILD_NUMBER}
-            Consultez les logs pour plus de détails
+            Consultez les logs pour plus de details
             ========================================
             """
-
-            // Notification (optionnel)
-            // slackSend color: 'danger', message: "❌ Product Service déploiement échoué"
         }
 
         always {
             echo "=== Nettoyage ==="
 
-            // Nettoyer les images Docker locales pour économiser l'espace
             sh """
                 docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
                 docker rmi ${IMAGE_NAME}:latest || true
             """
 
-            // Logout Azure
             sh 'az logout || true'
-
-            // Nettoyer le workspace (optionnel)
-            // cleanWs()
         }
     }
 }
-```
-
----
-
-## ⚙️ **Configuration Jenkins - Étapes détaillées**
-
-### **ÉTAPE 1 : Installer les plugins nécessaires**
-
-Allez dans **Manage Jenkins** → **Manage Plugins** → **Available plugins**
-
-Installez ces plugins :
-```
-✅ Azure Credentials
-✅ Azure CLI Plugin
-✅ Docker Pipeline
-✅ Pipeline
-✅ Git
-✅ Kubernetes CLI Plugin
-✅ Maven Integration
-✅ Pipeline: Stage View
