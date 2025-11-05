@@ -17,7 +17,7 @@ pipeline {
         K8S_NAMESPACE = 'inventory'
 
         // Credentials IDs (à créer dans Jenkins)
-        AZURE_CREDENTIALS_ID = 'azure-credentials'
+        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
 
         // Version de l'image
         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
@@ -300,7 +300,7 @@ pipeline {
         K8S_NAMESPACE = 'inventory'
 
         // Credentials IDs (à créer dans Jenkins)
-        AZURE_CREDENTIALS_ID = 'azure-credentials'
+        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
 
         // Version de l'image
         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
@@ -579,4 +579,3 @@ pipeline {
         }
     }
 }
-
