@@ -1,3 +1,65 @@
+pipeline {
+    agent any
+
+    environment {
+        // Configuration du service
+        SERVICE_NAME = 'gateway-service'
+        SERVICE_DIR = 'gateway'
+
+        // Azure Container Registry
+        ACR_NAME = 'mohammed'
+        ACR_URL = "${ACR_NAME}.azurecr.io"
+        IMAGE_NAME = "${ACR_URL}/gateway"
+
+        // Azure Kubernetes
+        AKS_CLUSTER = 'aks'
+        AKS_RESOURCE_GROUP = 'aks-Cloud'
+        K8S_NAMESPACE = 'inventory'
+
+        // Credentials IDs (à créer dans Jenkins)
+        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
+
+        // Version de l'image
+        IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
+
+        // Maven
+        MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('🔍 Checkout Code') {
+            steps {
+                echo "=== Checkout du code pour ${SERVICE_NAME} ==="
+                checkout scm
+
+                script {
+                    // Vérifier si des changements dans gateway/
+                    def changes = sh(
+                        script: 'git diff --name-only HEAD~1 2>/dev/null || echo "gateway/"',
+                        returnStdout: true
+                    ).trim()
+
+                    if (!changes.contains('gateway/') && !changes.contains('Jenkinsfile')) {
+                        echo "⚠️  Aucun changement dans gateway/, skip du build"
+                        currentBuild.result = 'NOT_BUILT'
+                        error('Aucun changement détecté dans gateway/')
+                    }
+
+                    echo "✅ Changements détectés dans gateway/"
+                }
+            }
+        }
+
+        stage('☕ Setup Java 17') {
+            steps {
+                echo "=== Configuration de Java 17 ==="
+
                 script {
                     sh 'java -version'
                     sh 'mvn -version'
@@ -235,65 +297,3 @@
         }
     }
 }
-pipeline {
-    agent any
-
-    environment {
-        // Configuration du service
-        SERVICE_NAME = 'gateway-service'
-        SERVICE_DIR = 'gateway'
-
-        // Azure Container Registry
-        ACR_NAME = 'mohammed'
-        ACR_URL = "${ACR_NAME}.azurecr.io"
-        IMAGE_NAME = "${ACR_URL}/gateway"
-
-        // Azure Kubernetes
-        AKS_CLUSTER = 'aks'
-        AKS_RESOURCE_GROUP = 'aks-Cloud'
-        K8S_NAMESPACE = 'inventory'
-
-        // Credentials IDs (à créer dans Jenkins)
-        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
-
-        // Version de l'image
-        IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
-
-        // Maven
-        MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
-    }
-
-    options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 30, unit: 'MINUTES')
-        disableConcurrentBuilds()
-    }
-
-    stages {
-        stage('🔍 Checkout Code') {
-            steps {
-                echo "=== Checkout du code pour ${SERVICE_NAME} ==="
-                checkout scm
-
-                script {
-                    // Vérifier si des changements dans gateway/
-                    def changes = sh(
-                        script: 'git diff --name-only HEAD~1 2>/dev/null || echo "gateway/"',
-                        returnStdout: true
-                    ).trim()
-
-                    if (!changes.contains('gateway/') && !changes.contains('Jenkinsfile')) {
-                        echo "⚠️  Aucun changement dans gateway/, skip du build"
-                        currentBuild.result = 'NOT_BUILT'
-                        error('Aucun changement détecté dans gateway/')
-                    }
-
-                    echo "✅ Changements détectés dans gateway/"
-                }
-            }
-        }
-
-        stage('☕ Setup Java 17') {
-            steps {
-                echo "=== Configuration de Java 17 ==="
-
