@@ -193,7 +193,7 @@ pipeline {
                     echo "Attente du rollout..."
                     kubectl rollout status deployment/${SERVICE_NAME} \
                         -n ${K8S_NAMESPACE} \
-                        --timeout=5m
+                        --timeout=10m
                 """
             }
             post {
