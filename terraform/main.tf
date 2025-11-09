@@ -23,9 +23,15 @@ resource "azurerm_kubernetes_cluster" "aks" {
   dns_prefix          = "inventory"
 
   default_node_pool {
-    name       = "default"
-    node_count = var.node_count
-    vm_size    = var.node_vm_size
+    name                = "default"
+    vm_size             = var.node_vm_size
+
+    # ⭐ AUTOSCALING ACTIVÉ (syntaxe v4.x)
+    auto_scaling_enabled = true
+    min_count           = 2
+    max_count           = 5
+
+    # node_count est incompatible avec auto_scaling_enabled
   }
 
   identity {

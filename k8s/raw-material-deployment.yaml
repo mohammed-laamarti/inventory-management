@@ -5,7 +5,7 @@ metadata:
   name: raw-material-service
   namespace: inventory
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: raw-material-service

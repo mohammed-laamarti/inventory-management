@@ -5,7 +5,7 @@ metadata:
   name: supplier-service
   namespace: inventory
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: supplier-service
