@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'maven-docker'  // ← Utilise l'agent avec tous les outils
+    }
 
     environment {
         // Configuration du service
@@ -17,7 +19,7 @@ pipeline {
         K8S_NAMESPACE = 'inventory'
 
         // Credentials IDs (à créer dans Jenkins)
-        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
+        AZURE_CREDENTIALS_ID = 'azure-jenkins'
 
         // Version de l'image
         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
@@ -26,13 +28,9 @@ pipeline {
         MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
     }
 
-    // Déclencher seulement si changements dans supplier/
     options {
-        // Garder seulement les 10 derniers builds
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        // Timeout après 30 minutes
         timeout(time: 30, unit: 'MINUTES')
-        // Désactiver concurrent builds
         disableConcurrentBuilds()
     }
 
@@ -41,30 +39,13 @@ pipeline {
             steps {
                 echo "=== Checkout du code pour ${SERVICE_NAME} ==="
                 checkout scm
-
-                script {
-                    // Vérifier si des changements dans supplier/
-                    def changes = sh(
-                        script: 'git diff --name-only HEAD~1 2>/dev/null || echo "supplier/"',
-                        returnStdout: true
-                    ).trim()
-
-                    if (!changes.contains('supplier/') && !changes.contains('Jenkinsfile')) {
-                        echo "⚠️  Aucun changement dans supplier/, skip du build"
-                        currentBuild.result = 'NOT_BUILT'
-                        error('Aucun changement détecté dans supplier/')
-                    }
-
-                    echo "✅ Changements détectés dans supplier/"
-                }
             }
         }
 
         stage('☕ Setup Java 17') {
             steps {
-                echo "=== Configuration de Java 17 ==="
-                script {
-                    // Java devrait être déjà installé sur l'agent Jenkins
+                container('maven') {  // ← Utilise le conteneur maven
+                    echo "=== Configuration de Java 17 ==="
                     sh 'java -version'
                     sh 'mvn -version'
                 }
@@ -73,11 +54,13 @@ pipeline {
 
         stage('📦 Build with Maven') {
             steps {
-                echo "=== Build Maven du Supplier Service ==="
-                dir(SERVICE_DIR) {
-                    sh """
-                        mvn clean package -DskipTests ${MAVEN_OPTS}
-                    """
+                container('maven') {  // ← Utilise le conteneur maven
+                    echo "=== Build Maven du Supplier Service ==="
+                    dir(SERVICE_DIR) {
+                        sh """
+                            mvn clean package -DskipTests ${MAVEN_OPTS}
+                        """
+                    }
                 }
             }
             post {
@@ -92,38 +75,42 @@ pipeline {
 
         stage('🔐 Login to Azure') {
             steps {
-                echo "=== Connexion à Azure ==="
-                withCredentials([azureServicePrincipal(
-                    credentialsId: AZURE_CREDENTIALS_ID,
-                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-                    clientIdVariable: 'AZURE_CLIENT_ID',
-                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
-                    tenantIdVariable: 'AZURE_TENANT_ID'
-                )]) {
-                    sh """
-                        az login --service-principal \
-                            -u \$AZURE_CLIENT_ID \
-                            -p \$AZURE_CLIENT_SECRET \
-                            --tenant \$AZURE_TENANT_ID
+                container('azure-cli') {  // ← Utilise le conteneur azure-cli
+                    echo "=== Connexion à Azure ==="
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az login --service-principal \
+                                -u \$AZURE_CLIENT_ID \
+                                -p \$AZURE_CLIENT_SECRET \
+                                --tenant \$AZURE_TENANT_ID
 
-                        az account set --subscription \$AZURE_SUBSCRIPTION_ID
-                    """
+                            az account set --subscription \$AZURE_SUBSCRIPTION_ID
+                        """
+                    }
                 }
             }
         }
 
         stage('🐳 Login to Azure Container Registry') {
             steps {
-                echo "=== Connexion à Azure Container Registry ==="
-                sh "az acr login --name ${ACR_NAME}"
+                container('azure-cli') {  // ← Utilise le conteneur azure-cli
+                    echo "=== Connexion à Azure Container Registry ==="
+                    sh "az acr login --name ${ACR_NAME}"
+                }
             }
         }
 
         stage('🏗️  Build Docker Image') {
             steps {
-                echo "=== Build de l'image Docker ==="
-                dir(SERVICE_DIR) {
-                    script {
+                container('docker') {  // ← Utilise le conteneur docker
+                    echo "=== Build de l'image Docker ==="
+                    dir(SERVICE_DIR) {
                         sh """
                             docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                             docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
@@ -140,19 +127,15 @@ pipeline {
 
         stage('🔒 Scan Docker Image with Trivy') {
             steps {
-                echo "=== Scan de sécurité avec Trivy ==="
-                script {
-                    // Scanner l'image avec Trivy
+                container('trivy') {  // ← Utilise le conteneur trivy
+                    echo "=== Scan de sécurité avec Trivy ==="
                     sh """
                         trivy image \
                             --format sarif \
                             --output trivy-results.sarif \
                             --severity HIGH,CRITICAL \
                             ${IMAGE_NAME}:${IMAGE_TAG} || true
-                    """
 
-                    // Scanner en mode table pour les logs
-                    sh """
                         trivy image \
                             --severity HIGH,CRITICAL \
                             ${IMAGE_NAME}:${IMAGE_TAG} || true
@@ -161,7 +144,6 @@ pipeline {
             }
             post {
                 always {
-                    // Archiver les résultats
                     archiveArtifacts artifacts: 'trivy-results.sarif', allowEmptyArchive: true
                 }
             }
@@ -169,11 +151,13 @@ pipeline {
 
         stage('📤 Push Docker Image') {
             steps {
-                echo "=== Push de l'image vers ACR ==="
-                sh """
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                    docker push ${IMAGE_NAME}:latest
-                """
+                container('docker') {  // ← Utilise le conteneur docker
+                    echo "=== Push de l'image vers ACR ==="
+                    sh """
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${IMAGE_NAME}:latest
+                    """
+                }
             }
             post {
                 success {
@@ -184,41 +168,41 @@ pipeline {
 
         stage('☸️  Set AKS Context') {
             steps {
-                echo "=== Configuration du contexte AKS ==="
-                withCredentials([azureServicePrincipal(
-                    credentialsId: AZURE_CREDENTIALS_ID,
-                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-                    clientIdVariable: 'AZURE_CLIENT_ID',
-                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
-                    tenantIdVariable: 'AZURE_TENANT_ID'
-                )]) {
-                    sh """
-                        az aks get-credentials \
-                            --resource-group ${AKS_RESOURCE_GROUP} \
-                            --name ${AKS_CLUSTER} \
-                            --overwrite-existing
-                    """
+                container('azure-cli') {  // ← Utilise le conteneur azure-cli
+                    echo "=== Configuration du contexte AKS ==="
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az aks get-credentials \
+                                --resource-group ${AKS_RESOURCE_GROUP} \
+                                --name ${AKS_CLUSTER} \
+                                --overwrite-existing
+                        """
+                    }
                 }
-
-                // Vérifier la connexion
-                sh 'kubectl cluster-info'
-                sh "kubectl get nodes"
             }
         }
 
         stage('🚀 Deploy to AKS') {
             steps {
-                echo "=== Déploiement vers AKS ==="
-                sh """
-                    kubectl set image deployment/${SERVICE_NAME} \
-                        ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
-                        -n ${K8S_NAMESPACE}
+                container('kubectl') {  // ← Utilise le conteneur kubectl
+                    echo "=== Déploiement vers AKS ==="
+                    sh """
+                        kubectl set image deployment/${SERVICE_NAME} \
+                            ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n ${K8S_NAMESPACE}
 
-                    echo "Attente du rollout..."
-                    kubectl rollout status deployment/${SERVICE_NAME} \
-                        -n ${K8S_NAMESPACE} \
-                        --timeout=10m
-                """
+                        echo "Attente du rollout..."
+                        kubectl rollout status deployment/${SERVICE_NAME} \
+                            -n ${K8S_NAMESPACE} \
+                            --timeout=10m
+                    """
+                }
             }
             post {
                 success {
@@ -226,27 +210,31 @@ pipeline {
                 }
                 failure {
                     echo "❌ Déploiement échoué, rollback en cours..."
-                    sh """
-                        kubectl rollout undo deployment/${SERVICE_NAME} \
-                            -n ${K8S_NAMESPACE} || true
-                    """
+                    container('kubectl') {
+                        sh """
+                            kubectl rollout undo deployment/${SERVICE_NAME} \
+                                -n ${K8S_NAMESPACE} || true
+                        """
+                    }
                 }
             }
         }
 
         stage('✅ Verify Deployment') {
             steps {
-                echo "=== Vérification du déploiement ==="
-                sh """
-                    echo "Status des pods:"
-                    kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+                container('kubectl') {  // ← Utilise le conteneur kubectl
+                    echo "=== Vérification du déploiement ==="
+                    sh """
+                        echo "Status des pods:"
+                        kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
 
-                    echo "\\nStatus du deployment:"
-                    kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+                        echo "\\nStatus du deployment:"
+                        kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
 
-                    echo "\\nStatus du service:"
-                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || echo "Pas de service trouvé"
-                """
+                        echo "\\nStatus du service:"
+                        kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || echo "Pas de service trouvé"
+                    """
+                }
             }
         }
     }
@@ -262,9 +250,6 @@ pipeline {
             Build: #${BUILD_NUMBER}
             ========================================
             """
-
-            // Notification (optionnel)
-            // slackSend color: 'good', message: "✅ Supplier Service déployé avec succès"
         }
 
         failure {
@@ -276,25 +261,21 @@ pipeline {
             Consultez les logs pour plus de détails
             ========================================
             """
-
-            // Notification (optionnel)
-            // slackSend color: 'danger', message: "❌ Supplier Service déploiement échoué"
         }
 
         always {
             echo "=== Nettoyage ==="
 
-            // Nettoyer les images Docker locales pour économiser l'espace
-            sh """
-                docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
-                docker rmi ${IMAGE_NAME}:latest || true
-            """
+            container('docker') {
+                sh """
+                    docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+                """
+            }
 
-            // Logout Azure
-            sh 'az logout || true'
-
-            // Nettoyer le workspace (optionnel)
-            // cleanWs()
+            container('azure-cli') {
+                sh 'az logout || true'
+            }
         }
     }
 }

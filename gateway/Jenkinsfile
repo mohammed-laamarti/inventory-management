@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'maven-docker'
+    }
 
     environment {
         // Configuration du service
@@ -17,7 +19,7 @@ pipeline {
         K8S_NAMESPACE = 'inventory'
 
         // Credentials IDs (à créer dans Jenkins)
-        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
+        AZURE_CREDENTIALS_ID = 'azure-jenkins'
 
         // Version de l'image
         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
@@ -37,30 +39,13 @@ pipeline {
             steps {
                 echo "=== Checkout du code pour ${SERVICE_NAME} ==="
                 checkout scm
-
-                script {
-                    // Vérifier si des changements dans gateway/
-                    def changes = sh(
-                        script: 'git diff --name-only HEAD~1 2>/dev/null || echo "gateway/"',
-                        returnStdout: true
-                    ).trim()
-
-                    if (!changes.contains('gateway/') && !changes.contains('Jenkinsfile')) {
-                        echo "⚠️  Aucun changement dans gateway/, skip du build"
-                        currentBuild.result = 'NOT_BUILT'
-                        error('Aucun changement détecté dans gateway/')
-                    }
-
-                    echo "✅ Changements détectés dans gateway/"
-                }
             }
         }
 
         stage('☕ Setup Java 17') {
             steps {
-                echo "=== Configuration de Java 17 ==="
-
-                script {
+                container('maven') {
+                    echo "=== Configuration de Java 17 ==="
                     sh 'java -version'
                     sh 'mvn -version'
                 }
@@ -69,57 +54,50 @@ pipeline {
 
         stage('📦 Build with Maven') {
             steps {
-                echo "=== Build Maven du Gateway Service ==="
-                dir(SERVICE_DIR) {
-                    sh """
-                        mvn clean package -DskipTests ${MAVEN_OPTS}
-                    """
-                }
-            }
-            post {
-                success {
-                    echo "✅ Build Maven réussi"
-                }
-                failure {
-                    echo "❌ Build Maven échoué"
+                container('maven') {
+                    echo "=== Build Maven du Gateway Service ==="
+                    dir(SERVICE_DIR) {
+                        sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
+                    }
                 }
             }
         }
 
         stage('🔐 Login to Azure') {
             steps {
-                echo "=== Connexion à Azure ==="
-                withCredentials([azureServicePrincipal(
-                    credentialsId: AZURE_CREDENTIALS_ID,
-                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-                    clientIdVariable: 'AZURE_CLIENT_ID',
-                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
-                    tenantIdVariable: 'AZURE_TENANT_ID'
-                )]) {
-                    sh """
-                        az login --service-principal \
-                            -u \$AZURE_CLIENT_ID \
-                            -p \$AZURE_CLIENT_SECRET \
-                            --tenant \$AZURE_TENANT_ID
+                container('azure-cli') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az login --service-principal \
+                                -u \$AZURE_CLIENT_ID \
+                                -p \$AZURE_CLIENT_SECRET \
+                                --tenant \$AZURE_TENANT_ID
 
-                        az account set --subscription \$AZURE_SUBSCRIPTION_ID
-                    """
+                            az account set --subscription \$AZURE_SUBSCRIPTION_ID
+                        """
+                    }
                 }
             }
         }
 
-        stage('🐳 Login to Azure Container Registry') {
+        stage('🐳 Login to ACR') {
             steps {
-                echo "=== Connexion à Azure Container Registry ==="
-                sh "az acr login --name ${ACR_NAME}"
+                container('azure-cli') {
+                    sh "az acr login --name ${ACR_NAME}"
+                }
             }
         }
 
         stage('🏗️  Build Docker Image') {
             steps {
-                echo "=== Build de l'image Docker ==="
-                dir(SERVICE_DIR) {
-                    script {
+                container('docker') {
+                    dir(SERVICE_DIR) {
                         sh """
                             docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                             docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
@@ -127,173 +105,97 @@ pipeline {
                     }
                 }
             }
-            post {
-                success {
-                    echo "✅ Image Docker construite: ${IMAGE_NAME}:${IMAGE_TAG}"
-                }
-            }
         }
 
-        stage('🔒 Scan Docker Image with Trivy') {
+        stage('🔒 Scan with Trivy') {
             steps {
-                echo "=== Scan de sécurité avec Trivy ==="
-                script {
-                    sh """
-                        trivy image \
-                            --format sarif \
-                            --output trivy-results.sarif \
-                            --severity HIGH,CRITICAL \
-                            ${IMAGE_NAME}:${IMAGE_TAG} || true
-                    """
-
-                    sh """
-                        trivy image \
-                            --severity HIGH,CRITICAL \
-                            ${IMAGE_NAME}:${IMAGE_TAG} || true
-                    """
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'trivy-results.sarif', allowEmptyArchive: true
+                container('trivy') {
+                    sh "trivy image --severity HIGH,CRITICAL ${IMAGE_NAME}:${IMAGE_TAG} || true"
                 }
             }
         }
 
         stage('📤 Push Docker Image') {
             steps {
-                echo "=== Push de l'image vers ACR ==="
-                sh """
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                    docker push ${IMAGE_NAME}:latest
-                """
-            }
-            post {
-                success {
-                    echo "✅ Image pushée: ${IMAGE_NAME}:${IMAGE_TAG}"
+                container('docker') {
+                    sh """
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${IMAGE_NAME}:latest
+                    """
                 }
             }
         }
 
         stage('☸️  Set AKS Context') {
             steps {
-                echo "=== Configuration du contexte AKS ==="
-                withCredentials([azureServicePrincipal(
-                    credentialsId: AZURE_CREDENTIALS_ID,
-                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-                    clientIdVariable: 'AZURE_CLIENT_ID',
-                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
-                    tenantIdVariable: 'AZURE_TENANT_ID'
-                )]) {
-                    sh """
-                        az aks get-credentials \
-                            --resource-group ${AKS_RESOURCE_GROUP} \
-                            --name ${AKS_CLUSTER} \
-                            --overwrite-existing
-                    """
+                container('azure-cli') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az aks get-credentials \
+                                --resource-group ${AKS_RESOURCE_GROUP} \
+                                --name ${AKS_CLUSTER} \
+                                --overwrite-existing
+                        """
+                    }
                 }
-
-                sh 'kubectl cluster-info'
-                sh "kubectl get nodes"
             }
         }
 
         stage('🚀 Deploy to AKS') {
             steps {
-                echo "=== Déploiement vers AKS ==="
-                sh """
-                    kubectl set image deployment/${SERVICE_NAME} \
-                        ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
-                        -n ${K8S_NAMESPACE}
-
-                    echo "Attente du rollout..."
-                    kubectl rollout status deployment/${SERVICE_NAME} \
-                        -n ${K8S_NAMESPACE} \
-                        --timeout=10m
-                """
+                container('kubectl') {
+                    sh """
+                        kubectl set image deployment/${SERVICE_NAME} \
+                            ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n ${K8S_NAMESPACE}
+                        kubectl rollout status deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} --timeout=5m
+                    """
+                }
             }
             post {
                 success {
-                    echo "✅ Déploiement réussi sur AKS"
-
-                    // Afficher l'URL du LoadBalancer
-                    script {
-                        sh """
-                            echo "\\n🌐 Récupération de l'IP externe du Gateway..."
-                            kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
-                        """
+                    container('kubectl') {
+                        sh "kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}"
                     }
                 }
                 failure {
-                    echo "❌ Déploiement échoué, rollback en cours..."
-                    sh """
-                        kubectl rollout undo deployment/${SERVICE_NAME} \
-                            -n ${K8S_NAMESPACE} || true
-                    """
+                    container('kubectl') {
+                        sh "kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true"
+                    }
                 }
             }
         }
 
-        stage('✅ Verify Deployment') {
+        stage('✅ Verify') {
             steps {
-                echo "=== Vérification du déploiement ==="
-                sh """
-                    echo "Status des pods:"
-                    kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
-
-                    echo "\\nStatus du deployment:"
-                    kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
-
-                    echo "\\nStatus du service (LoadBalancer):"
-                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
-
-                    echo "\\n⏳ Attente de l'IP externe (peut prendre 1-2 minutes)..."
-                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || echo "En attente..."
-                """
+                container('kubectl') {
+                    sh """
+                        kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+                        kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+                        kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+                    """
+                }
             }
         }
     }
 
     post {
-        success {
-            echo """
-            ========================================
-            ✅ Pipeline Gateway Service réussi !
-            ========================================
-            Image: ${IMAGE_NAME}:${IMAGE_TAG}
-            Namespace: ${K8S_NAMESPACE}
-            Build: #${BUILD_NUMBER}
-
-            🌐 Point d'entrée principal de l'application
-            Type: LoadBalancer (IP externe)
-            Port: 8222
-
-            Récupérez l'IP externe avec:
-            kubectl get svc gateway-service -n inventory
-            ========================================
-            """
-        }
-
-        failure {
-            echo """
-            ========================================
-            ❌ Pipeline Gateway Service échoué !
-            ========================================
-            Build: #${BUILD_NUMBER}
-            Consultez les logs pour plus de détails
-            ========================================
-            """
-        }
-
         always {
-            echo "=== Nettoyage ==="
-
-            sh """
-                docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
-                docker rmi ${IMAGE_NAME}:latest || true
-            """
-
-            sh 'az logout || true'
+            container('docker') {
+                sh """
+                    docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+                """
+            }
+            container('azure-cli') {
+                sh 'az logout || true'
+            }
         }
     }
 }

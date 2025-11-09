@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'maven-docker'  // ← Utilise l'agent avec tous les outils
+    }
 
     environment {
         // Configuration du service
@@ -17,7 +19,7 @@ pipeline {
         K8S_NAMESPACE = 'inventory'
 
         // Credentials IDs
-        AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
+        AZURE_CREDENTIALS_ID = 'azure-jenkins'
 
         // Version de l'image
         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
@@ -33,77 +35,71 @@ pipeline {
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('🔍 Checkout Code') {
             steps {
                 echo "=== Checkout du code pour ${SERVICE_NAME} ==="
                 checkout scm
-
-                // Désactivé temporairement pour testing
-                echo "Build force - verification des changements desactivee"
             }
         }
 
-        stage('Setup Java 17') {
+        stage('☕ Setup Java 17') {
             steps {
-                echo "=== Configuration de Java 17 ==="
-                script {
+                container('maven') {
+                    echo "=== Configuration de Java 17 ==="
                     sh 'java -version'
                     sh 'mvn -version'
                 }
             }
         }
 
-        stage('Build with Maven') {
+        stage('📦 Build with Maven') {
             steps {
-                echo "=== Build Maven du Product Service ==="
-                dir(SERVICE_DIR) {
-                    sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
-                }
-            }
-            post {
-                success {
-                    echo "Build Maven reussi"
-                }
-                failure {
-                    echo "Build Maven echoue"
+                container('maven') {
+                    echo "=== Build Maven du Product Service ==="
+                    dir(SERVICE_DIR) {
+                        sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
+                    }
                 }
             }
         }
 
-        stage('Login to Azure') {
+        stage('🔐 Login to Azure') {
             steps {
-                echo "=== Connexion a Azure ==="
-                withCredentials([azureServicePrincipal(
-                    credentialsId: AZURE_CREDENTIALS_ID,
-                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-                    clientIdVariable: 'AZURE_CLIENT_ID',
-                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
-                    tenantIdVariable: 'AZURE_TENANT_ID'
-                )]) {
-                    sh """
-                        az login --service-principal \
-                            -u \$AZURE_CLIENT_ID \
-                            -p \$AZURE_CLIENT_SECRET \
-                            --tenant \$AZURE_TENANT_ID
-
-                        az account set --subscription \$AZURE_SUBSCRIPTION_ID
-                    """
+                container('azure-cli') {
+                    echo "=== Connexion à Azure ==="
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az login --service-principal \
+                                -u \$AZURE_CLIENT_ID \
+                                -p \$AZURE_CLIENT_SECRET \
+                                --tenant \$AZURE_TENANT_ID
+                            az account set --subscription \$AZURE_SUBSCRIPTION_ID
+                        """
+                    }
                 }
             }
         }
 
-        stage('Login to ACR') {
+        stage('🐳 Login to Azure Container Registry') {
             steps {
-                echo "=== Connexion a Azure Container Registry ==="
-                sh "az acr login --name ${ACR_NAME}"
+                container('azure-cli') {
+                    echo "=== Connexion à Azure Container Registry ==="
+                    sh "az acr login --name ${ACR_NAME}"
+                }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('🏗️  Build Docker Image') {
             steps {
-                echo "=== Build de l'image Docker ==="
-                dir(SERVICE_DIR) {
-                    script {
+                container('docker') {
+                    echo "=== Build de l'image Docker ==="
+                    dir(SERVICE_DIR) {
                         sh """
                             docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                             docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
@@ -111,17 +107,12 @@ pipeline {
                     }
                 }
             }
-            post {
-                success {
-                    echo "Image Docker construite: ${IMAGE_NAME}:${IMAGE_TAG}"
-                }
-            }
         }
 
-        stage('Scan Docker Image') {
+        stage('🔒 Scan Docker Image with Trivy') {
             steps {
-                echo "=== Scan de securite avec Trivy ==="
-                script {
+                container('trivy') {
+                    echo "=== Scan de sécurité avec Trivy ==="
                     sh """
                         trivy image \
                             --format sarif \
@@ -129,139 +120,95 @@ pipeline {
                             --severity HIGH,CRITICAL \
                             ${IMAGE_NAME}:${IMAGE_TAG} || true
                     """
+                }
+            }
+        }
 
+        stage('📤 Push Docker Image') {
+            steps {
+                container('docker') {
+                    echo "=== Push de l'image vers ACR ==="
                     sh """
-                        trivy image \
-                            --severity HIGH,CRITICAL \
-                            ${IMAGE_NAME}:${IMAGE_TAG} || true
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${IMAGE_NAME}:latest
+                    """
+                }
+            }
+        }
+
+        stage('☸️  Set AKS Context') {
+            steps {
+                container('azure-cli') {
+                    echo "=== Configuration du contexte AKS ==="
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az aks get-credentials \
+                                --resource-group ${AKS_RESOURCE_GROUP} \
+                                --name ${AKS_CLUSTER} \
+                                --overwrite-existing
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('🚀 Deploy to AKS') {
+            steps {
+                container('kubectl') {
+                    echo "=== Déploiement vers AKS ==="
+                    sh """
+                        kubectl set image deployment/${SERVICE_NAME} \
+                            ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n ${K8S_NAMESPACE}
+                        kubectl rollout status deployment/${SERVICE_NAME} \
+                            -n ${K8S_NAMESPACE} \
+                            --timeout=10m
                     """
                 }
             }
             post {
-                always {
-                    archiveArtifacts artifacts: 'trivy-results.sarif', allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                echo "=== Push de l'image vers ACR ==="
-                sh """
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                    docker push ${IMAGE_NAME}:latest
-                """
-            }
-            post {
-                success {
-                    echo "Image pushee: ${IMAGE_NAME}:${IMAGE_TAG}"
-                }
-            }
-        }
-
-        stage('Set AKS Context') {
-            steps {
-                echo "=== Configuration du contexte AKS ==="
-                withCredentials([azureServicePrincipal(
-                    credentialsId: AZURE_CREDENTIALS_ID,
-                    subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-                    clientIdVariable: 'AZURE_CLIENT_ID',
-                    clientSecretVariable: 'AZURE_CLIENT_SECRET',
-                    tenantIdVariable: 'AZURE_TENANT_ID'
-                )]) {
-                    sh """
-                        az aks get-credentials \
-                            --resource-group ${AKS_RESOURCE_GROUP} \
-                            --name ${AKS_CLUSTER} \
-                            --overwrite-existing
-                    """
-                }
-
-                sh 'kubectl cluster-info'
-                sh "kubectl get nodes"
-            }
-        }
-
-        stage('Deploy to AKS') {
-            steps {
-                echo "=== Deploiement vers AKS ==="
-                sh """
-                    kubectl set image deployment/${SERVICE_NAME} \
-                        ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
-                        -n ${K8S_NAMESPACE}
-
-                    echo "Attente du rollout..."
-                    kubectl rollout status deployment/${SERVICE_NAME} \
-                        -n ${K8S_NAMESPACE} \
-                        --timeout=10m
-                """
-            }
-            post {
-                success {
-                    echo "Deploiement reussi sur AKS"
-                }
                 failure {
-                    echo "Deploiement echoue, rollback en cours..."
-                    sh """
-                        kubectl rollout undo deployment/${SERVICE_NAME} \
-                            -n ${K8S_NAMESPACE} || true
-                    """
+                    container('kubectl') {
+                        sh """
+                            kubectl rollout undo deployment/${SERVICE_NAME} \
+                                -n ${K8S_NAMESPACE} || true
+                        """
+                    }
                 }
             }
         }
 
-        stage('Verify Deployment') {
+        stage('✅ Verify Deployment') {
             steps {
-                echo "=== Verification du deploiement ==="
-                sh """
-                    echo "Status des pods:"
-                    kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
-
-                    echo ""
-                    echo "Status du deployment:"
-                    kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
-
-                    echo ""
-                    echo "Status du service:"
-                    kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || echo "Pas de service trouve"
-                """
+                container('kubectl') {
+                    echo "=== Vérification du déploiement ==="
+                    sh """
+                        kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+                        kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+                        kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || true
+                    """
+                }
             }
         }
     }
 
     post {
-        success {
-            echo """
-            ========================================
-            Pipeline Product Service reussi !
-            ========================================
-            Image: ${IMAGE_NAME}:${IMAGE_TAG}
-            Namespace: ${K8S_NAMESPACE}
-            Build: #${BUILD_NUMBER}
-            ========================================
-            """
-        }
-
-        failure {
-            echo """
-            ========================================
-            Pipeline Product Service echoue !
-            ========================================
-            Build: #${BUILD_NUMBER}
-            Consultez les logs pour plus de details
-            ========================================
-            """
-        }
-
         always {
-            echo "=== Nettoyage ==="
-
-            sh """
-                docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
-                docker rmi ${IMAGE_NAME}:latest || true
-            """
-
-            sh 'az logout || true'
+            container('docker') {
+                sh """
+                    docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+                """
+            }
+            container('azure-cli') {
+                sh 'az logout || true'
+            }
         }
     }
 }
