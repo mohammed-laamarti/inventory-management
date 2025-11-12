@@ -88,8 +88,20 @@ pipeline {
 
         stage('🐳 Login to ACR') {
             steps {
-                container('azure-cli') {
-                    sh "az acr login --name ${ACR_NAME}"
+                container('docker') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            echo \$AZURE_CLIENT_SECRET | docker login ${ACR_URL} \
+                                -u \$AZURE_CLIENT_ID \
+                                --password-stdin
+                        """
+                    }
                 }
             }
         }
@@ -159,11 +171,6 @@ pipeline {
                 }
             }
             post {
-                success {
-                    container('kubectl') {
-                        sh "kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}"
-                    }
-                }
                 failure {
                     container('kubectl') {
                         sh "kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true"
@@ -178,7 +185,7 @@ pipeline {
                     sh """
                         kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
                         kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
-                        kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+                        kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || true
                     """
                 }
             }

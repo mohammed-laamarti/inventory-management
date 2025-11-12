@@ -126,7 +126,13 @@ pipeline {
                 }
             }
         }
-
+       stage('Debug kubectl') {
+            steps {
+                container('kubectl') {
+                    sh 'kubectl version --client'
+                }
+            }
+        }
         stage('📤 Push Docker Image') {
             steps {
                 container('docker') {

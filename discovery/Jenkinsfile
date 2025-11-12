@@ -1,185 +1,208 @@
-// pipeline {
-//     agent {
-//         label 'maven-docker'
-//     }
-//
-//     environment {
-//         SERVICE_NAME = 'discovery'
-//         SERVICE_DIR = 'discovery'
-//         ACR_NAME = 'mohammed'
-//         ACR_URL = "${ACR_NAME}.azurecr.io"
-//         IMAGE_NAME = "${ACR_URL}/${SERVICE_NAME}"
-//         AKS_CLUSTER = 'aks'
-//         AKS_RESOURCE_GROUP = 'aks-Cloud'
-//         K8S_NAMESPACE = 'inventory'
-//         AZURE_CREDENTIALS_ID = 'azure-jenkins-sp'
-//         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
-//         MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
-//     }
-//
-//     options {
-//         buildDiscarder(logRotator(numToKeepStr: '10'))
-//         timeout(time: 30, unit: 'MINUTES')
-//         disableConcurrentBuilds()
-//     }
-//
-//     stages {
-//         stage('🔍 Checkout Code') {
-//             steps {
-//                 echo "=== Checkout du code pour ${SERVICE_NAME} ==="
-//                 checkout scm
-//             }
-//         }
-//
-//         stage('☕ Setup Java 17') {
-//             steps {
-//                 container('maven') {
-//                     echo "=== Configuration de Java 17 ==="
-//                     sh 'java -version'
-//                     sh 'mvn -version'
-//                 }
-//             }
-//         }
-//
-//         stage('📦 Build with Maven') {
-//             steps {
-//                 container('maven') {
-//                     echo "=== Build Maven du Discovery Service (Eureka) ==="
-//                     dir(SERVICE_DIR) {
-//                         sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
-//                     }
-//                 }
-//             }
-//         }
-//
-//         stage('🔐 Login to Azure') {
-//             steps {
-//                 container('azure-cli') {
-//                     withCredentials([azureServicePrincipal(
-//                         credentialsId: AZURE_CREDENTIALS_ID,
-//                         subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-//                         clientIdVariable: 'AZURE_CLIENT_ID',
-//                         clientSecretVariable: 'AZURE_CLIENT_SECRET',
-//                         tenantIdVariable: 'AZURE_TENANT_ID'
-//                     )]) {
-//                         sh """
-//                             az login --service-principal \
-//                                 -u \$AZURE_CLIENT_ID \
-//                                 -p \$AZURE_CLIENT_SECRET \
-//                                 --tenant \$AZURE_TENANT_ID
-//                             az account set --subscription \$AZURE_SUBSCRIPTION_ID
-//                         """
-//                     }
-//                 }
-//             }
-//         }
-//
-//         stage('🐳 Login to ACR') {
-//             steps {
-//                 container('azure-cli') {
-//                     sh "az acr login --name ${ACR_NAME}"
-//                 }
-//             }
-//         }
-//
-//         stage('🏗️  Build Docker Image') {
-//             steps {
-//                 container('docker') {
-//                     dir(SERVICE_DIR) {
-//                         sh """
-//                             docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-//                             docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
-//                         """
-//                     }
-//                 }
-//             }
-//         }
-//
-//         stage('🔒 Scan with Trivy') {
-//             steps {
-//                 container('trivy') {
-//                     sh "trivy image --severity HIGH,CRITICAL ${IMAGE_NAME}:${IMAGE_TAG} || true"
-//                 }
-//             }
-//         }
-//
-//         stage('📤 Push Docker Image') {
-//             steps {
-//                 container('docker') {
-//                     sh """
-//                         docker push ${IMAGE_NAME}:${IMAGE_TAG}
-//                         docker push ${IMAGE_NAME}:latest
-//                     """
-//                 }
-//             }
-//         }
-//
-//         stage('☸️  Set AKS Context') {
-//             steps {
-//                 container('azure-cli') {
-//                     withCredentials([azureServicePrincipal(
-//                         credentialsId: AZURE_CREDENTIALS_ID,
-//                         subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
-//                         clientIdVariable: 'AZURE_CLIENT_ID',
-//                         clientSecretVariable: 'AZURE_CLIENT_SECRET',
-//                         tenantIdVariable: 'AZURE_TENANT_ID'
-//                     )]) {
-//                         sh """
-//                             az aks get-credentials \
-//                                 --resource-group ${AKS_RESOURCE_GROUP} \
-//                                 --name ${AKS_CLUSTER} \
-//                                 --overwrite-existing
-//                         """
-//                     }
-//                 }
-//             }
-//         }
-//
-//         stage('🚀 Deploy to AKS') {
-//             steps {
-//                 container('kubectl') {
-//                     sh """
-//                         kubectl set image deployment/${SERVICE_NAME} \
-//                             ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
-//                             -n ${K8S_NAMESPACE}
-//                         kubectl rollout status deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} --timeout=5m
-//                     """
-//                 }
-//             }
-//             post {
-//                 failure {
-//                     container('kubectl') {
-//                         sh "kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true"
-//                     }
-//                 }
-//             }
-//         }
-//
-//         stage('✅ Verify') {
-//             steps {
-//                 container('kubectl') {
-//                     sh """
-//                         kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
-//                         kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
-//                         kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || true
-//                     """
-//                 }
-//             }
-//         }
-//     }
-//
-//     post {
-//         always {
-//             container('docker') {
-//                 sh """
-//                     docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
-//                     docker rmi ${IMAGE_NAME}:latest || true
-//                 """
-//             }
-//             container('azure-cli') {
-//                 sh 'az logout || true'
-//             }
-//         }
-//     }
-// }
-//
+pipeline {
+    agent {
+        label 'maven-docker'
+    }
+
+    environment {
+        // Configuration du service
+        SERVICE_NAME = 'discovery'
+        SERVICE_DIR = 'discovery'
+
+        // Azure Container Registry
+        ACR_NAME = 'mohammed'
+        ACR_URL = "${ACR_NAME}.azurecr.io"
+        IMAGE_NAME = "${ACR_URL}/${SERVICE_NAME}"
+
+        // Azure Kubernetes
+        AKS_CLUSTER = 'aks'
+        AKS_RESOURCE_GROUP = 'aks-Cloud'
+        K8S_NAMESPACE = 'inventory'
+
+        // Credentials IDs (à créer dans Jenkins)
+        AZURE_CREDENTIALS_ID = 'jenkins-aks'
+
+        // Version de l'image
+        IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
+
+        // Maven
+        MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('🔍 Checkout Code') {
+            steps {
+                echo "=== Checkout du code pour ${SERVICE_NAME} ==="
+                checkout scm
+            }
+        }
+
+        stage('☕ Setup Java 17') {
+            steps {
+                container('maven') {
+                    echo "=== Configuration de Java 17 ==="
+                    sh 'java -version'
+                    sh 'mvn -version'
+                }
+            }
+        }
+
+        stage('📦 Build with Maven') {
+            steps {
+                container('maven') {
+                    echo "=== Build Maven du Discovery Service (Eureka) ==="
+                    dir(SERVICE_DIR) {
+                        sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
+                    }
+                }
+            }
+        }
+
+        stage('🔐 Login to Azure') {
+            steps {
+                container('azure-cli') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az login --service-principal \
+                                -u \$AZURE_CLIENT_ID \
+                                -p \$AZURE_CLIENT_SECRET \
+                                --tenant \$AZURE_TENANT_ID
+
+                            az account set --subscription \$AZURE_SUBSCRIPTION_ID
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('🐳 Login to ACR') {
+            steps {
+                container('docker') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            echo \$AZURE_CLIENT_SECRET | docker login ${ACR_URL} \
+                                -u \$AZURE_CLIENT_ID \
+                                --password-stdin
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('🏗️  Build Docker Image') {
+            steps {
+                container('docker') {
+                    dir(SERVICE_DIR) {
+                        sh """
+                            docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('🔒 Scan with Trivy') {
+            steps {
+                container('trivy') {
+                    sh "trivy image --severity HIGH,CRITICAL ${IMAGE_NAME}:${IMAGE_TAG} || true"
+                }
+            }
+        }
+
+        stage('📤 Push Docker Image') {
+            steps {
+                container('docker') {
+                    sh """
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${IMAGE_NAME}:latest
+                    """
+                }
+            }
+        }
+
+        stage('☸️  Set AKS Context') {
+            steps {
+                container('azure-cli') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            az aks get-credentials \
+                                --resource-group ${AKS_RESOURCE_GROUP} \
+                                --name ${AKS_CLUSTER} \
+                                --overwrite-existing
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('🚀 Deploy to AKS') {
+            steps {
+                container('kubectl') {
+                    sh """
+                        kubectl set image deployment/${SERVICE_NAME} \
+                            ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n ${K8S_NAMESPACE}
+                        kubectl rollout status deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} --timeout=5m
+                    """
+                }
+            }
+            post {
+                failure {
+                    container('kubectl') {
+                        sh "kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true"
+                    }
+                }
+            }
+        }
+
+        stage('✅ Verify') {
+            steps {
+                container('kubectl') {
+                    sh """
+                        kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+                        kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+                        kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || true
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            container('docker') {
+                sh """
+                    docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+                """
+            }
+            container('azure-cli') {
+                sh 'az logout || true'
+            }
+        }
+    }
+}

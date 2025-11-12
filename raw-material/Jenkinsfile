@@ -28,13 +28,9 @@ pipeline {
         MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
     }
 
-    // Déclencher seulement si changements dans raw-material/
     options {
-        // Garder seulement les 10 derniers builds
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        // Timeout après 30 minutes
         timeout(time: 30, unit: 'MINUTES')
-        // Désactiver concurrent builds
         disableConcurrentBuilds()
     }
 
@@ -70,7 +66,6 @@ pipeline {
         stage('🔐 Login to Azure') {
             steps {
                 container('azure-cli') {
-                    echo "=== Connexion à Azure ==="
                     withCredentials([azureServicePrincipal(
                         credentialsId: AZURE_CREDENTIALS_ID,
                         subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
@@ -91,10 +86,22 @@ pipeline {
             }
         }
 
-        stage('🐳 Login to Azure Container Registry') {
+        stage('🐳 Login to ACR') {
             steps {
-                container('azure-cli') {
-                    sh "az acr login --name ${ACR_NAME}"
+                container('docker') {
+                    withCredentials([azureServicePrincipal(
+                        credentialsId: AZURE_CREDENTIALS_ID,
+                        subscriptionIdVariable: 'AZURE_SUBSCRIPTION_ID',
+                        clientIdVariable: 'AZURE_CLIENT_ID',
+                        clientSecretVariable: 'AZURE_CLIENT_SECRET',
+                        tenantIdVariable: 'AZURE_TENANT_ID'
+                    )]) {
+                        sh """
+                            echo \$AZURE_CLIENT_SECRET | docker login ${ACR_URL} \
+                                -u \$AZURE_CLIENT_ID \
+                                --password-stdin
+                        """
+                    }
                 }
             }
         }
@@ -102,7 +109,6 @@ pipeline {
         stage('🏗️  Build Docker Image') {
             steps {
                 container('docker') {
-                    echo "=== Build de l'image Docker ==="
                     dir(SERVICE_DIR) {
                         sh """
                             docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
@@ -113,16 +119,10 @@ pipeline {
             }
         }
 
-        stage('🔒 Scan Docker Image with Trivy') {
+        stage('🔒 Scan with Trivy') {
             steps {
                 container('trivy') {
-                    sh """
-                        trivy image \
-                            --format sarif \
-                            --output trivy-results.sarif \
-                            --severity HIGH,CRITICAL \
-                            ${IMAGE_NAME}:${IMAGE_TAG} || true
-                    """
+                    sh "trivy image --severity HIGH,CRITICAL ${IMAGE_NAME}:${IMAGE_TAG} || true"
                 }
             }
         }
@@ -166,11 +166,7 @@ pipeline {
                         kubectl set image deployment/${SERVICE_NAME} \
                             ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
                             -n ${K8S_NAMESPACE}
-
-                        echo "Attente du rollout..."
-                        kubectl rollout status deployment/${SERVICE_NAME} \
-                            -n ${K8S_NAMESPACE} \
-                            --timeout=10m
+                        kubectl rollout status deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} --timeout=5m
                     """
                 }
             }
@@ -183,7 +179,7 @@ pipeline {
             }
         }
 
-        stage('✅ Verify Deployment') {
+        stage('✅ Verify') {
             steps {
                 container('kubectl') {
                     sh """
