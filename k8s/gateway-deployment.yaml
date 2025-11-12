@@ -5,7 +5,7 @@ metadata:
   name: gateway-service
   namespace: inventory
 spec:
-  replicas: 1  # ⬅️ Réduis à 1 temporairement
+  replicas: 2  # ⬅️ Réduis à 1 temporairement
   selector:
     matchLabels:
       app: gateway-service
