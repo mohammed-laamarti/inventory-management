@@ -138,7 +138,7 @@ pipeline {
             }
         }
 
-        stage('☸️  Set AKS Context') {
+        stage('☸️  Deploy to AKS') {
             steps {
                 container('azure-cli') {
                     withCredentials([azureServicePrincipal(
@@ -149,37 +149,33 @@ pipeline {
                         tenantIdVariable: 'AZURE_TENANT_ID'
                     )]) {
                         sh """
+                            # Installer kubectl
+                            az aks install-cli
+
+                            # Get AKS credentials
                             az aks get-credentials \
                                 --resource-group ${AKS_RESOURCE_GROUP} \
                                 --name ${AKS_CLUSTER} \
                                 --overwrite-existing
+
+                            # Deploy
+                            kubectl set image deployment/${SERVICE_NAME} \
+                                ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                                -n ${K8S_NAMESPACE}
+
+                            kubectl rollout status deployment/${SERVICE_NAME} \
+                                -n ${K8S_NAMESPACE} --timeout=5m
                         """
                     }
                 }
             }
-        }
-        stage('Debug kubectl') {
-            steps {
-                container('azure-cli') {
-                    sh 'kubectl version --client'
-                }
-            }
-        }
-        stage('🚀 Deploy to AKS') {
-            steps {
-                container('kubectl') {
-                    sh """
-                        kubectl set image deployment/${SERVICE_NAME} \
-                            ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
-                            -n ${K8S_NAMESPACE}
-                        kubectl rollout status deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} --timeout=5m
-                    """
-                }
-            }
             post {
                 failure {
-                    container('kubectl') {
-                        sh "kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true"
+                    container('azure-cli') {
+                        sh """
+                            az aks install-cli
+                            kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true
+                        """
                     }
                 }
             }
@@ -187,8 +183,9 @@ pipeline {
 
         stage('✅ Verify') {
             steps {
-                container('kubectl') {
+                container('azure-cli') {
                     sh """
+                        az aks install-cli
                         kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
                         kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
                         kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE} || true
