@@ -1,32 +1,32 @@
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: inventory-alerts
-  namespace: monitoring
-  labels:
-    release: prometheus
-spec:
-  groups:
-    - name: inventory-alerts
-      interval: 30s
-      rules:
-
-        # Alerte si un microservice est down
-        - alert: MicroserviceDown
-          expr: up{namespace="inventory"} == 0
-          for: 2m
-          labels:
-            severity: critical
-          annotations:
-            summary: "Service {{ $labels.job }} est DOWN"
-            description: "{{ $labels.job }} est inaccessible depuis 2 minutes"
-
-        # Alerte si pod redémarre trop
-        - alert: PodRestarting
-          expr: rate(kube_pod_container_status_restarts_total{namespace="inventory"}[15m]) > 0
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Pod {{ $labels.pod }} redémarre"
-            description: "{{ $labels.pod }} a redémarré plusieurs fois"
+#apiVersion: monitoring.coreos.com/v1
+#kind: PrometheusRule
+#metadata:
+#  name: inventory-alerts
+#  namespace: monitoring
+#  labels:
+#    release: prometheus
+#spec:
+#  groups:
+#    - name: inventory-alerts
+#      interval: 30s
+#      rules:
+#
+#        # Alerte si un microservice est down
+#        - alert: MicroserviceDown
+#          expr: up{namespace="inventory"} == 0
+#          for: 2m
+#          labels:
+#            severity: critical
+#          annotations:
+#            summary: "Service {{ $labels.job }} est DOWN"
+#            description: "{{ $labels.job }} est inaccessible depuis 2 minutes"
+#
+#        # Alerte si pod redémarre trop
+#        - alert: PodRestarting
+#          expr: rate(kube_pod_container_status_restarts_total{namespace="inventory"}[15m]) > 0
+#          for: 5m
+#          labels:
+#            severity: warning
+#          annotations:
+#            summary: "Pod {{ $labels.pod }} redémarre"
+#            description: "{{ $labels.pod }} a redémarré plusieurs fois"

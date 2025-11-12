@@ -1,17 +1,17 @@
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: inventory-microservices
-  namespace: monitoring
-  labels:
-    release: prometheus  # ⬅️ TRÈS IMPORTANT : doit matcher ton installation Helm
-spec:
-  namespaceSelector:
-    matchNames:
-      - inventory  # ⬅️ Scrape le namespace inventory
-  selector:
-    matchLabels: {}  # ⬅️ Match TOUS les services avec le label
-  endpoints:
-    - port: http  # ⬅️ Le nom du port dans tes Services
-      path: /actuator/prometheus
-      interval: 30s
+#apiVersion: monitoring.coreos.com/v1
+#kind: ServiceMonitor
+#metadata:
+#  name: inventory-microservices
+#  namespace: monitoring
+#  labels:
+#    release: prometheus  # ⬅️ TRÈS IMPORTANT : doit matcher ton installation Helm
+#spec:
+#  namespaceSelector:
+#    matchNames:
+#      - inventory  # ⬅️ Scrape le namespace inventory
+#  selector:
+#    matchLabels: {}  # ⬅️ Match TOUS les services avec le label
+#  endpoints:
+#    - port: http  # ⬅️ Le nom du port dans tes Services
+#      path: /actuator/prometheus
+#      interval: 30s
