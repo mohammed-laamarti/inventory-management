@@ -4,27 +4,16 @@ pipeline {
     }
 
     environment {
-        // Configuration du service
-        SERVICE_NAME = 'product-service'
-        SERVICE_DIR = 'product'
-
-        // Azure Container Registry
+        SERVICE_NAME = 'config-server'
+        SERVICE_DIR = 'config-server'
         ACR_NAME = 'mohammed'
         ACR_URL = "${ACR_NAME}.azurecr.io"
         IMAGE_NAME = "${ACR_URL}/${SERVICE_NAME}"
-
-        // Azure Kubernetes
         AKS_CLUSTER = 'aks'
         AKS_RESOURCE_GROUP = 'aks-Cloud'
         K8S_NAMESPACE = 'inventory'
-
-        // Credentials IDs (à créer dans Jenkins)
         AZURE_CREDENTIALS_ID = 'jenkins-aks'
-
-        // Version de l'image
         IMAGE_TAG = "${env.GIT_COMMIT?.take(7) ?: BUILD_NUMBER}"
-
-        // Maven
         MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
     }
 
@@ -55,7 +44,7 @@ pipeline {
         stage('📦 Build with Maven') {
             steps {
                 container('maven') {
-                    echo "=== Build Maven du Product Service ==="
+                    echo "=== Build Maven du Config Server ==="
                     dir(SERVICE_DIR) {
                         sh "mvn clean package -DskipTests ${MAVEN_OPTS}"
                     }
@@ -158,16 +147,10 @@ pipeline {
                 }
             }
         }
-        stage('Debug kubectl') {
-            steps {
-                container('kubectl') {
-                    sh 'kubectl version --client'
-                }
-            }
-        }
+
         stage('🚀 Deploy to AKS') {
             steps {
-                container('kubectl') {
+                container('azure-cli') {  // ⬅️ Changé de 'kubectl' à 'azure-cli'
                     sh """
                         kubectl set image deployment/${SERVICE_NAME} \
                             ${SERVICE_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
@@ -178,7 +161,7 @@ pipeline {
             }
             post {
                 failure {
-                    container('kubectl') {
+                    container('azure-cli') {  // ⬅️ Aussi ici
                         sh "kubectl rollout undo deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || true"
                     }
                 }
@@ -187,7 +170,7 @@ pipeline {
 
         stage('✅ Verify') {
             steps {
-                container('kubectl') {
+                container('azure-cli') {  // ⬅️ Et ici
                     sh """
                         kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
                         kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
